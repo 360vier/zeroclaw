@@ -975,18 +975,6 @@ impl SlackChannel {
         }
     }
 
-    /// Remove `<@bot_user_id>` mentions from a rendered backfill line so
-    /// historical thread content does not re-trigger "did the user @ me?"
-    /// heuristics when the agent reads it as context.
-    fn strip_bot_mentions(text: &str, bot_user_id: &str) -> String {
-        if bot_user_id.is_empty() {
-            return text.trim().to_string();
-        }
-        text.replace(&format!("<@{bot_user_id}>"), " ")
-            .trim()
-            .to_string()
-    }
-
     /// Pure composer for the `[Thread context]` block. Takes the
     /// already-rendered per-message lines (after allow-list filtering and
     /// reply-cap truncation) plus the two omission counts, and returns the
@@ -1367,14 +1355,9 @@ impl SlackChannel {
             .fetch_thread_messages_with_retry(channel_id, thread_ts)
             .await
         else {
-            ::zeroclaw_log::record!(
-                WARN,
-                ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
-                    .with_outcome(::zeroclaw_log::EventOutcome::Unknown)
-                    .with_attrs(::serde_json::json!({
-                        "channel_id": channel_id,
-                        "thread_ts": thread_ts,
-                    })),
+            tracing::warn!(
+                channel_id = channel_id,
+                thread_ts = thread_ts,
                 "Slack: thread-context backfill skipped — conversations.replies fetch returned None"
             );
             return None;
@@ -1401,16 +1384,12 @@ impl SlackChannel {
             reply_cap_omitted,
         );
         if block.is_some() {
-            ::zeroclaw_log::record!(
-                DEBUG,
-                ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
-                    .with_attrs(::serde_json::json!({
-                        "channel_id": channel_id,
-                        "thread_ts": thread_ts,
-                        "rendered": total_allowed.saturating_sub(reply_cap_omitted),
-                        "dropped_by_allow_list": dropped_by_allow_list,
-                        "reply_cap_omitted": reply_cap_omitted,
-                    })),
+            tracing::debug!(
+                channel_id = channel_id,
+                thread_ts = thread_ts,
+                rendered = total_allowed.saturating_sub(reply_cap_omitted),
+                dropped_by_allow_list = dropped_by_allow_list,
+                reply_cap_omitted = reply_cap_omitted,
                 "Slack: thread-context backfill prepended"
             );
         }
@@ -5700,13 +5679,7 @@ mod tests {
     /// skip backfill.
     #[test]
     fn thread_backfill_first_reply_backfills_then_subsequent_replies_do_not() {
-        let ch = SlackChannel::new(
-            "xoxb-fake".into(),
-            None,
-            vec!["C1".into()],
-            "slack_test_alias",
-            Arc::new(Vec::new),
-        );
+        let ch = SlackChannel::new("xoxb-fake".into(), None, vec!["C1".into()], vec![]);
 
         let reply1 = serde_json::json!({
             "ts": "T_REPLY1",
