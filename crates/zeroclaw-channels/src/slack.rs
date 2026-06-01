@@ -797,9 +797,13 @@ impl SlackChannel {
             return None;
         }
 
-        // Always strip bot mentions so the model sees clean text,
-        // even in threads where the mention wasn't required.
-        Some(Self::strip_bot_mentions(text, bot_user_id))
+        // Keep the bot mention in the trigger text. Stripping it here
+        // hides the explicit @-mention from the downstream agent loop,
+        // which then refuses to reply because its own "addressed to me?"
+        // heuristic doesn't see itself in the body. Upstream v0.8 made
+        // the same change for this reason; backported here so the
+        // v0.7-based dogfood branch behaves consistently.
+        Some(text.trim().to_string())
     }
 
     #[cfg(test)]
@@ -4666,9 +4670,14 @@ mod tests {
     #[test]
     fn normalize_incoming_content_requires_mention_when_enabled() {
         assert!(SlackChannel::normalize_incoming_content("hello", true, "U_BOT").is_none());
+        // The bot mention is preserved in the normalized text so the
+        // downstream agent loop can see it was explicitly @-mentioned.
+        // Stripping here used to hide the mention from the LLM, which
+        // then refused to reply because its own "addressed to me?"
+        // heuristic couldn't see itself in the body.
         assert_eq!(
             SlackChannel::normalize_incoming_content("<@U_BOT> run", true, "U_BOT").as_deref(),
-            Some("run")
+            Some("<@U_BOT> run")
         );
     }
 
